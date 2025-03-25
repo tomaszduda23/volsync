@@ -185,11 +185,21 @@ jobs:
 
   build-operator:
     name: Build-operator
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
 
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Determine architecture
+        id: arch
+        run: |
+          ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')"
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
 
       - name: Build operator container
         run: make docker-build IMG=${OPERATOR_IMAGE}
@@ -200,7 +210,7 @@ jobs:
       - name: Save container as artifact
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         with:
-          name: volsync-operator
+          name: volsync-operator-${{ env.ARCH }}
           path: /tmp/image.tar
 
   build-scorecard:
@@ -242,7 +252,12 @@ jobs:
 
   kubectl-plugin:
     name: kubectl-plugin
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+
     env:
       KUBECONFIG: /tmp/kubeconfig
       KUBERNETES_VERSION: "1.25.0"
@@ -255,6 +270,12 @@ jobs:
           # (required by krew validation)
           fetch-depth: 0
 
+      - name: Determine architecture
+        id: arch
+        run: |
+          ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')"
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+
       - name: Install Go
         uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
@@ -262,7 +283,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          curl -fsSLO "https://storage.googleapis.com/kubernetes-release/release/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl"
+          curl -fsSLO "https://dl.k8s.io/release/v${KUBERNETES_VERSION}/bin/linux/${{ env.ARCH }}/kubectl"
           sudo install ./kubectl /usr/local/bin/
           kubectl version --short --client
           kubectl version --short --client | grep -q ${KUBERNETES_VERSION}
@@ -272,8 +293,7 @@ jobs:
         run: |
           cd "$(mktemp -d)"
           OS="$(uname | tr '[:upper:]' '[:lower:]')"
-          ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')"
-          KREW="krew-${OS}_${ARCH}"
+          KREW="krew-${OS}_${{ env.ARCH }}"
           curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/latest/download/${KREW}.tar.gz"
           tar zxvf "${KREW}.tar.gz"
           ./"${KREW}" install krew
@@ -285,13 +305,14 @@ jobs:
       - name: Save cli as artifact
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         with:
-          name: kubectl-volsync
+          name: kubectl-volsync-${{ env.ARCH }}
           path: bin/kubectl-volsync
 
   e2e:
     name: End-to-end
     needs: [build-operator, kubectl-plugin]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -311,6 +332,7 @@ jobs:
           - "1.29.0"   # OCP 4.16
           - "1.30.0"   # OCP 4.17
           - "1.31.0"   # OCP 4.18
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     env:
       KUBECONFIG: /tmp/kubeconfig
       KUBERNETES_VERSION: ${{ matrix.KUBERNETES_VERSIONS }}
@@ -333,9 +355,15 @@ jobs:
           sudo ln -s bash /bin/sh.bash && sudo mv /bin/sh.bash /bin/sh
           sudo ln -s bash /usr/bin/sh.bash && sudo mv /usr/bin/sh.bash /usr/bin/sh
 
+      - name: Determine architecture
+        id: arch
+        run: |
+          ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')"
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+
       - name: Install kubectl
         run: |
-          curl -fsSLO "https://storage.googleapis.com/kubernetes-release/release/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl"
+          curl -fsSLO "https://dl.k8s.io/release/v${KUBERNETES_VERSION}/bin/linux/${{ env.ARCH }}/kubectl"
           sudo install ./kubectl /usr/local/bin/
           kubectl version --client
           kubectl version --client | grep -q ${KUBERNETES_VERSION}
@@ -345,7 +373,7 @@ jobs:
 
       - name: Install kind
         run: |
-          curl -fsSL -o kind https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64
+          curl -fsSL -o kind https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-${{ env.ARCH }}
           sudo install ./kind /usr/local/bin && rm kind
           kind version
           kind version | grep -q ${KIND_VERSION}
@@ -365,7 +393,7 @@ jobs:
       - name: Load operator container artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: volsync-operator
+          name: volsync-operator-${{ env.ARCH }}
           path: /tmp
 
       - name: Import container image into cluster
@@ -390,7 +418,7 @@ jobs:
       - name: Load cli artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: kubectl-volsync
+          name: kubectl-volsync-${{ env.ARCH }}
           path: bin
 
       - name: Make cli executable
@@ -449,7 +477,7 @@ jobs:
     needs: push-gate
     uses: ./.github/workflows/registry-push.yml
     with:
-      artifact-name: volsync-operator
+      artifact-name: volsync-operator-amd64
       image-name: quay.io/backube/volsync
     secrets:
       registry-username: ${{ secrets.REGISTRY_USERNAME }}
