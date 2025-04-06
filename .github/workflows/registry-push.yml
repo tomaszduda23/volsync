@@ -23,6 +23,11 @@ on:  # yamllint disable-line rule:truthy
         description: Name of the container image to push
         required: true
         type: string
+      multiarch:
+        description: Whether the image is multi-architecture
+        required: false
+        default: false
+        type: boolean
     secrets:
       registry-username:
         description: Username for the image registry
@@ -34,17 +39,38 @@ on:  # yamllint disable-line rule:truthy
 jobs:
   push-to-registry:
     runs-on: ubuntu-latest
+
+    services:
+      registry:
+        image: registry:3.0.0
+        ports:
+          - 5000:5000
+
     steps:
       - name: Load container artifact
         uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           name: ${{ inputs.artifact-name }}
-          path: /tmp
+          path: / 
+        if: ${{ !inputs.multiarch }}
 
       - name: Import container image
         run: |
           docker load -i /tmp/${{ inputs.image-filename }}
           docker inspect ${{ inputs.image-name }}
+        if: ${{ !inputs.multiarch }}
+
+      - name: Load container artifact
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          pattern: ${{ inputs.artifact-name }}-*
+          path: / 
+        if: ${{ inputs.multiarch }}
+
+      - name: Import container image
+        run: |
+          ls -l /tmp
+        if: ${{ inputs.multiarch }}
 
       - name: Login to registry
         # If the registry server is specified in the image name, we use that.
